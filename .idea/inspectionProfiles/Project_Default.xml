@@ -1,0 +1,67 @@
+<component name="InspectionProjectProfileManager">
+  <profile version="1.0">
+    <option name="myName" value="Project Default" />
+    <inspection_tool class="PyPackageRequirementsInspection" enabled="true" level="INFORMATION" enabled_by_default="true">
+      <option name="ignoredPackages">
+        <list>
+          <option value="annotated-types" />
+          <option value="anthropic" />
+          <option value="anyio" />
+          <option value="certifi" />
+          <option value="cffi" />
+          <option value="charset-normalizer" />
+          <option value="colorama" />
+          <option value="cryptography" />
+          <option value="distro" />
+          <option value="docstring_parser" />
+          <option value="filelock" />
+          <option value="fsspec" />
+          <option value="google-ai-generativelanguage" />
+          <option value="google-api-core" />
+          <option value="google-api-python-client" />
+          <option value="google-auth" />
+          <option value="google-auth-httplib2" />
+          <option value="google-generativeai" />
+          <option value="googleapis-common-protos" />
+          <option value="h11" />
+          <option value="httpcore" />
+          <option value="httplib2" />
+          <option value="httpx" />
+          <option value="idna" />
+          <option value="Jinja2" />
+          <option value="jiter" />
+          <option value="llvmlite" />
+          <option value="MarkupSafe" />
+          <option value="more-itertools" />
+          <option value="mpmath" />
+          <option value="networkx" />
+          <option value="numba" />
+          <option value="numpy" />
+          <option value="openai" />
+          <option value="openai-whisper" />
+          <option value="proto-plus" />
+          <option value="protobuf" />
+          <option value="pyasn1" />
+          <option value="pyasn1_modules" />
+          <option value="pycparser" />
+          <option value="pydantic" />
+          <option value="pydantic_core" />
+          <option value="pyparsing" />
+          <option value="python-dotenv" />
+          <option value="regex" />
+          <option value="requests" />
+          <option value="setuptools" />
+          <option value="sniffio" />
+          <option value="sympy" />
+          <option value="tiktoken" />
+          <option value="torch" />
+          <option value="tqdm" />
+          <option value="typing-inspection" />
+          <option value="typing_extensions" />
+          <option value="uritemplate" />
+          <option value="urllib3" />
+        </list>
+      </option>
+    </inspection_tool>
+  </profile>
+</component>
