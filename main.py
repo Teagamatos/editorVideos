@@ -69,6 +69,9 @@ class VideoRequest(BaseModel):
 # ══════════════════════════════════════════════════════════════════
 #  Endpoints
 # ══════════════════════════════════════════════════════════════════
+@app.get("/")
+async def root():
+    return {"service": "editorVideos", "status": "running"}
 
 @app.get("/health")
 async def health():
