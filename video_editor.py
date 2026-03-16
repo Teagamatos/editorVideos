@@ -15,6 +15,7 @@ import random
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
+from googleapiclient.errors import HttpError
 import video_tarja
 from logger import get_logger
 
@@ -1563,6 +1564,26 @@ def fazer_upload_drive(
     mime_type: str = "application/octet-stream",
 ):
     service = drive_service()
+    folder_id = (folder_id or "").strip()
+    if not folder_id:
+        raise ValueError("folder_id não informado para upload no Drive.")
+
+    try:
+        pasta_meta = service.files().get(
+            fileId=folder_id,
+            fields="id,name,mimeType",
+            supportsAllDrives=True,
+        ).execute()
+    except HttpError as exc:
+        raise RuntimeError(
+            f"Pasta de destino não encontrada ou sem permissão no Drive (folder_id={folder_id}). "
+            f"Verifique o ID e compartilhe a pasta com a service account."
+        ) from exc
+
+    if pasta_meta.get("mimeType") != "application/vnd.google-apps.folder":
+        raise RuntimeError(
+            f"O destino informado não é uma pasta do Drive (folder_id={folder_id}, name={pasta_meta.get('name')})."
+        )
 
     file_metadata = {
         "name": nome_no_drive or os.path.basename(arquivo_local),
@@ -1574,7 +1595,8 @@ def fazer_upload_drive(
     created = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields="id, webViewLink"
+        fields="id, webViewLink",
+        supportsAllDrives=True,
     ).execute()
 
     return {

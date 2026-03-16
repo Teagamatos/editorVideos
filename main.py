@@ -1,4 +1,5 @@
 import uuid
+import os
 from datetime import datetime
 from typing import Optional
 
@@ -84,8 +85,13 @@ async def receber_formulario(payload: VideoRequest, background_tasks: Background
     link = payload.linkVideo.strip()
     roteiro = payload.roteiroTexto.strip()
 
-    # Mock da pasta destino
-    pasta_destino_id = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs"
+    pasta_destino_id = os.getenv("GOOGLE_DRIVE_DEST_FOLDER_ID", "").strip()
+    if not pasta_destino_id:
+        log.error("GOOGLE_DRIVE_DEST_FOLDER_ID não configurada.")
+        raise HTTPException(
+            status_code=503,
+            detail="Configuração do servidor incompleta: GOOGLE_DRIVE_DEST_FOLDER_ID não definida.",
+        )
 
     log.info(
         f"Nova solicitação | titulo='{titulo}' | "
