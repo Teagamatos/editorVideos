@@ -16,8 +16,11 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 import video_tarja
+from logger import get_logger
 
 load_dotenv()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+log = get_logger(__name__)
 
 # ══════════════════════════════════════════════════════════════
 #  UTILITÁRIOS
@@ -650,6 +653,12 @@ def pegar_musica_aleatoria(pasta: str) -> str:
     return os.path.join(pasta, musica_escolhida)
 
 
+def _resolver_pasta_bgm(pasta_bgm: str) -> str:
+    if os.path.isabs(pasta_bgm):
+        return pasta_bgm
+    return os.path.join(BASE_DIR, pasta_bgm)
+
+
 def adicionar_bgm_com_ducking(
     arquivo_entrada: str,
     arquivo_saida: str,
@@ -661,7 +670,10 @@ def adicionar_bgm_com_ducking(
     attack: float = 0.20,
     release: float = 0.60,
 ) -> bool:
-    bgm_path = pegar_musica_aleatoria(os.environ.get("BGM_FOLDER", "musicas cortes"))
+    pasta_bgm = _resolver_pasta_bgm(os.environ.get("BGM_FOLDER", "musicas cortes"))
+    log.info("BGM folder resolvida: %s", pasta_bgm)
+    bgm_path = pegar_musica_aleatoria(pasta_bgm)
+    log.info("BGM selecionada: %s", bgm_path)
     if not verificar_ffmpeg():
         return False
     if not os.path.isfile(arquivo_entrada):
