@@ -850,23 +850,29 @@ def extrair_texto_documento(caminho: str) -> str:
 # ----------------------------
 # 2) Prompt completo (o mesmo que você aprovou)
 # ----------------------------
-PROMPT_SISTEMA = """Você é um extrator de instruções de edição de vídeo para um pipeline automatizado em Python.
+PROMPT_SISTEMA = """Você é um extrator de roteiro de edição audiovisual.
 
 Retorne SOMENTE JSON válido, seguindo o schema fornecido pelo response_format (JSON Schema).
 Não inclua explicações, comentários ou texto fora do JSON.
 """
 
-PROMPT_USUARIO = """Leia o roteiro de edição e preencha os campos do schema.
+PROMPT_USUARIO = """ Leia o roteiro de edição e preencha os campos do schema.
+
+Você é um extrator de roteiro de edição audiovisual
+
+Retorne SOMENTE JSON válido, sem explicações, sem markdown, sem texto antes ou depois.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 REGRAS GERAIS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 1) Identifique automaticamente o programa:
-   - Se for "Raise The Bar" → programa = "RTB"
-   - Se for "Gestão de Pessoas" → programa = "GP"
+   - Se aparecer "Raise The Bar" → programa = "RTB"
+   - Se aparecer "Gestão de Pessoas" → programa = "GP"
 
-2) Extraia o nome do episódio (nome do convidado + empresa se houver).
+2) Extraia o nome do episódio:
+   - usar nome do convidado
+   - incluir empresa e/ou cargo se houver no roteiro
 
 3) Considere apenas a parte principal do roteiro e ignore tudo abaixo (inclusive) de:
    - "Corte de Divulgação"
@@ -874,59 +880,123 @@ REGRAS GERAIS
    - "Corte inicial (Youtube)"
    - "Capítulos"
    - "CORTES DE IMPACTO"
-   - Qualquer seção de shorts ou cortes para redes sociais
+   - qualquer seção de shorts, reels, cortes para redes sociais ou divulgação
 
-4) Normalize TODOS os tempos para "HH:MM:SS"
-   - Sempre com 2 dígitos
-   - Se não houver horas, usar "00"
-   - Exemplo: 9:06 → 00:09:06
+4) Normalize TODOS os tempos obrigatoriamente para o formato "HH:MM:SS"
+   - sempre com 2 dígitos por bloco
+   - se não houver horas, usar "00"
+   - exemplos:
+     - 9:06 → 00:09:06
+     - 24:12 → 00:24:12
+     - 1:02:03 → 01:02:03
+
+5) NUNCA retorne tempos em outro formato.
+   - Todo tempo no JSON final deve estar em "HH:MM:SS"
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-ORDEM (REGRA CRÍTICA)
+ORDEM TEXTUAL (REGRA CRÍTICA)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 - A lista "trechos" DEVE respeitar ESTRITAMENTE a ordem textual do roteiro.
 - NUNCA ordenar por tempo cronológico.
 - Em linhas com "+", extrair da ESQUERDA para a DIREITA.
-- Mesmo que o tempo volte (ex: 24:12 antes de 09:06), manter a ordem do texto.
+- Mesmo que o tempo volte (por exemplo 24:12 antes de 09:06), manter a ordem em que os trechos aparecem no texto.
 - Se ordenar por horário, a resposta está errada.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+INTERPRETAÇÃO DO ROTEIRO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Há dois tipos de trechos:
+
+1) TRECHOS SOLTOS
+   - intervalos isolados em linhas avulsas
+   - se houver "+" na mesma linha, cada intervalo vira um trecho separado
+   - preservar a ordem textual da esquerda para a direita
+
+2) TRECHOS CONTÍNUOS PRINCIPAIS
+   - construir a timeline principal do episódio com base em:
+     - início da introdução
+     - inserção de vinheta de abertura
+     - instruções de corte
+     - finalização
+     - inserção de vinheta de encerramento
+
+Ao final, a lista "trechos" deve conter TODOS os trechos finais do roteiro na ordem textual em que aparecem.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 A) SOURCE VIDEO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 - Se houver "Link do episódio: X", preencher:
-  "source_label" = X
-- Se X parecer URL → preencher source_url
-- Caso contrário → source_url = null
+  - "source_label" = X
+  - se X parecer URL, preencher "source_url" = X
+  - caso contrário, "source_url" = null
+
+- Se não houver "Link do episódio", mas houver um único link claramente associado ao episódio bruto, usar esse link como source_label/source_url.
+
+- Se os links do roteiro forem apenas de vinheta e não do vídeo bruto:
+  - "source_label" = ""
+  - "source_url" = null
+
+- NÃO usar o link da vinheta de abertura ou encerramento como source_video, a menos que o roteiro diga explicitamente que aquele é o link do episódio.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 B) TRECHOS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-1) TRECHOS SOLTOS:
-   - Linha com intervalos separados por "+" vira múltiplos trechos.
-   - Preservar a ordem textual (esquerda → direita).
+1) TRECHOS SOLTOS
+- Linha com intervalos separados por "+" vira múltiplos trechos.
+- Preservar a ordem textual.
+- Exemplo:
+  "24:12 - 24:21 negocio + 09:06 - 09:09 post + 09:17 - 09:18 trabalho"
+  gera:
+  [
+    ["00:24:12","00:24:21"],
+    ["00:09:06","00:09:09"],
+    ["00:09:17","00:09:18"]
+  ]
 
-2) TRECHOS CONTÍNUOS:
-   - Se houver "A introdução começa em XX:XX", iniciar trecho contínuo nesse tempo.
-   - Se houver "Inserir vinheta de abertura em T":
-        → o trecho contínuo anterior termina em T
-   - Se houver "CORTAR A - B":
-        → o trecho termina em A
-        → o próximo começa em B
-   - Se houver outro "CORTAR C - D":
-        → aplicar mesma lógica
-   - Se houver "finalizar em F":
-        → último trecho termina em F
+2) TRECHOS CONTÍNUOS PRINCIPAIS
+- Se houver "A introdução começa em T", iniciar o primeiro trecho principal em T.
+- Se houver "Inserir vinheta de abertura em T":
+  - o trecho principal anterior termina em T
+  - a vinheta de abertura entra em T
+  - o próximo trecho principal pode começar novamente em T, salvo se o roteiro indicar explicitamente outro tempo de retomada
 
-3) REGRAS IMPORTANTES:
-   - NÃO criar automaticamente trecho "00:00:00 - <início da introdução>"
-     a menos que o roteiro peça explicitamente.
-   - A vinheta NÃO consome tempo do bruto.
-     Mesmo que a vinheta seja ["01:14","01:15"],
-     o trecho seguinte deve começar em "01:14" (não 01:15).
-   - NÃO gerar trechos com duração zero.
+3) RECONHECIMENTO DE CORTES
+Reconheça instruções de corte em qualquer um destes formatos:
+- "CORTAR A - B"
+- "A - B CORTAR"
+- "A - B cortar"
+- "T - cortar pausa para vinheta"
+- "T - cortar, finalizar e inserir vinheta de encerramento"
+
+Interpretação:
+- Se for um corte de intervalo A-B:
+  - o trecho atual termina em A
+  - o próximo trecho começa em B
+  - o conteúdo entre A e B deve ser removido
+
+- Se for "T - cortar pausa para vinheta":
+  - o trecho anterior termina em T
+  - a vinheta entra em T
+  - o próximo trecho pode continuar em T, salvo indicação explícita de outro tempo
+
+- Se for "T - cortar, finalizar e inserir vinheta de encerramento":
+  - o último trecho principal termina em T
+  - a vinheta de encerramento ocorre em T
+  - NÃO criar nenhum trecho após T
+
+4) REGRAS IMPORTANTES
+- NÃO criar automaticamente trecho "00:00:00 - X", a menos que o roteiro peça explicitamente.
+- A vinheta NÃO consome tempo do bruto.
+- Se a vinheta entra em T, o trecho seguinte pode começar em T.
+- NÃO gerar trechos com duração zero.
+- NÃO inventar tempos ausentes.
+- NÃO inferir cortes que não existem no texto.
+- Quando houver um corte A-B no meio da timeline principal, sempre retomar em B e continuar até o próximo corte ou até a finalização.
+- Quando houver finalização em F, o último trecho principal deve terminar exatamente em F.
 
 Formato obrigatório:
 "trechos": [
@@ -938,16 +1008,18 @@ C) TARJAS (OBRIGATÓRIO CAPTURAR TODAS)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 - TODA instrução contendo "Inserir tarja" deve gerar item em "tarjas".
-- Isso inclui hosts e convidados.
+- Isso inclui hosts, cohosts e convidados.
 - Não ignorar nenhuma tarja.
 
 Regras:
-- start = tempo indicado
-- end = start + 5 segundos (se não houver duração explícita)
-- texto = nome completo e cargo exatamente como aparece no roteiro
-- arquivo = nome plausível no formato:
-    tarja_nome_sobrenome.png
-    (sem acentos, minúsculo, com underscore)
+- "start" = tempo indicado
+- "end" = start + 5 segundos, se não houver duração explícita
+- "texto" = nome completo e cargo exatamente como aparece no roteiro
+- "arquivo" = nome plausível no formato:
+  tarja_nome_sobrenome.png
+  - sem acentos
+  - minúsculo
+  - com underscore
 
 Manter a ordem textual das tarjas.
 
@@ -968,20 +1040,27 @@ D) VINHETAS (CAMINHO DEPENDE DO PROGRAMA)
 O campo "arquivo" deve incluir o caminho correto conforme o programa:
 
 Se programa = "GP":
-  abertura → "GP/vinheta_abertura_h264.mp4"
-  encerramento → "GP/vinheta_encerramento.mp4"
+- abertura → "GP/vinheta_abertura_h264.mp4"
+- encerramento → "GP/vinheta_encerramento.mp4"
 
 Se programa = "RTB":
-  abertura → "RTB/raisethebarvinheta_abertura.mp4"
-  encerramento → "RTB/raisethebarvinheta_encerramento.mp4"
+- abertura → "RTB/raisethebarvinheta_abertura.mp4"
+- encerramento → "RTB/raisethebarvinheta_encerramento.mp4"
 
 Regras:
 - Abertura:
-    → usar tempo indicado
-    → se não houver duração explícita, usar intervalo de 1 segundo
+  - usar o tempo indicado
+  - se não houver duração explícita, usar intervalo de 1 segundo
+  - exemplo: T → ["T", "T+1 segundo"]
+
 - Encerramento:
-    → usar tempo final indicado
-- Capturar asset_url se existir, senão null
+  - usar o tempo final indicado
+
+- "asset_url":
+  - capturar URL da vinheta se existir
+  - senão null
+
+- NÃO usar link de vinheta como source_video do episódio, exceto se o roteiro disser explicitamente isso.
 
 Formato:
 "vinhetas": {
@@ -1002,8 +1081,8 @@ E) JUNÇÃO FINAL
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 - A lista "juncao" deve seguir EXATAMENTE a ordem de "trechos".
-- Usar index 1-based.
-- Inserir "vinheta_abertura" após o trecho que termina no tempo da vinheta.
+- Usar índice 1-based.
+- Inserir "vinheta_abertura" imediatamente após o trecho que termina no tempo da vinheta de abertura.
 - Finalizar sempre com "vinheta_encerramento".
 
 Formato:
@@ -1017,14 +1096,16 @@ Formato:
 CHECK FINAL OBRIGATÓRIO
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-ANTES DE RESPONDER:
+ANTES DE RESPONDER, valide internamente:
 
-- Confirmar que a ordem dos "trechos" segue a ordem textual.
-- Confirmar que NÃO existe trecho começando em 00:00:00,
-  salvo se o roteiro pedir explicitamente.
-- Confirmar que vinheta não alterou início real dos trechos.
-- Confirmar que TODAS as tarjas foram capturadas.
-- Confirmar que não existem trechos de duração zero.
+- Confirmar que todos os tempos estão em "HH:MM:SS"
+- Confirmar que a ordem dos "trechos" segue a ordem textual do roteiro
+- Confirmar que NÃO existe trecho começando em "00:00:00", salvo se o roteiro pedir explicitamente
+- Confirmar que a vinheta não alterou o início real dos trechos
+- Confirmar que TODAS as tarjas foram capturadas
+- Confirmar que não existem trechos de duração zero
+- Confirmar que o último trecho principal termina exatamente no ponto de finalização, se esse ponto existir
+- Confirmar que source_video NÃO usa link de vinheta, exceto se o roteiro disser explicitamente que é o link do episódio
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 FORMATO FINAL OBRIGATÓRIO (JSON)
@@ -1069,7 +1150,7 @@ Retorne SOMENTE JSON válido.
 
 ROTEIRO:
 ---
-{ROTEIRO}
+{roteiro}
 ---"""
 
 
