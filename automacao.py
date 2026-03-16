@@ -23,7 +23,7 @@ from logger import get_logger
 
 log = get_logger(__name__)
 
-CREDS_PATH = "tfclab-secret.json"
+CREDS_PATH = None
 
 # ══════════════════════════════════════════════════════════════════
 #  Ponto de entrada público
@@ -233,7 +233,7 @@ def _executar_pipeline(
         resultado_upload = fazer_upload_drive(
             arquivo_local=arquivo_final,
             folder_id=pasta_destino_id,
-            credenciais_json_path=CREDS_PATH,
+            credenciais_json_path=None,
             nome_no_drive=nome_drive,
             mime_type="video/mp4",
         )

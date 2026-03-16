@@ -14,8 +14,9 @@ from urllib.parse import urlparse, parse_qs
 import random
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 import video_tarja
+
 load_dotenv()
 
 # ══════════════════════════════════════════════════════════════
@@ -1316,21 +1317,21 @@ def drive_service():
     if not val:
         raise RuntimeError("GOOGLE_CREDENTIALS_JSON não definido")
 
-    # resolve caminho relativo ao projeto
-    base_dir = Path(__file__).resolve().parent
-    cred_path = (base_dir / val).resolve()
-    print("VAL:", val)
-    print("RESOLVED:", cred_path)
-    print("EXISTS:", cred_path.exists())
-    if cred_path.exists():
+    try:
+        # tenta interpretar como JSON direto da variável
+        info = json.loads(val)
+    except json.JSONDecodeError:
+        # se não for JSON, trata como caminho de arquivo local
+        base_dir = Path(__file__).resolve().parent
+        cred_path = (base_dir / val).resolve()
+
+        if not cred_path.exists():
+            raise RuntimeError(
+                f"GOOGLE_CREDENTIALS_JSON não é JSON válido e o arquivo não existe: {cred_path}"
+            )
 
         with open(cred_path, "r", encoding="utf-8") as f:
             info = json.load(f)
-
-    else:
-
-        # caso seja JSON direto
-        info = json.loads(val)
 
     creds = service_account.Credentials.from_service_account_info(
         info,
@@ -1338,6 +1339,7 @@ def drive_service():
     )
 
     return build("drive", "v3", credentials=creds)
+
 
 def listar_arquivos_em_pasta(
     folder_id: str,
@@ -1463,67 +1465,28 @@ def baixar_arquivo_drive_por_link(
 def fazer_upload_drive(
     arquivo_local: str,
     folder_id: str,
-    credenciais_json_path: str = "tfclab-secret.json",
-    nome_no_drive: Optional[str] = None,
-    mime_type: str = "video/mp4",
-) -> Dict[str, str]:
-    """
-    Faz upload de um arquivo local para uma pasta do Google Drive.
-
-    Retorna dict com {"id": "<fileId>", "name": "<nome>", "link": "<webViewLink>"}.
-
-    Parâmetros:
-        arquivo_local        : caminho do arquivo a enviar
-        folder_id            : ID da pasta de destino no Drive
-        credenciais_json_path: path do JSON de service account (fallback se env var ausente)
-        nome_no_drive        : nome do arquivo no Drive (padrão = basename do arquivo local)
-        mime_type            : MIME type do arquivo (padrão video/mp4)
-    """
-    from googleapiclient.http import MediaFileUpload
-
-    if not os.path.isfile(arquivo_local):
-        raise FileNotFoundError(f"Arquivo para upload não encontrado: {arquivo_local}")
-
-    nome_final = nome_no_drive or os.path.basename(arquivo_local)
-    tamanho_bytes = os.path.getsize(arquivo_local)
-
-    print(f"\n📤 Iniciando upload para o Drive...")
-    print(f"   Arquivo : {arquivo_local} ({tamanho_bytes / 1024 / 1024:.1f} MB)")
-    print(f"   Destino : pasta/{folder_id}")
-    print(f"   Nome    : {nome_final}")
-
+    credenciais_json_path: str | None = None,
+    nome_no_drive: str | None = None,
+    mime_type: str = "application/octet-stream",
+):
     service = drive_service()
 
     file_metadata = {
-        "name": nome_final,
+        "name": nome_no_drive or os.path.basename(arquivo_local),
         "parents": [folder_id],
     }
 
-    media = MediaFileUpload(
-        arquivo_local,
-        mimetype=mime_type,
-        resumable=True,          # upload retomável — essencial para vídeos grandes
-        chunksize=10 * 1024 * 1024,  # chunks de 10 MB
-    )
+    media = MediaFileUpload(arquivo_local, mimetype=mime_type, resumable=True)
 
-    request = service.files().create(
+    created = service.files().create(
         body=file_metadata,
         media_body=media,
-        fields="id,name,webViewLink",
-    )
+        fields="id, webViewLink"
+    ).execute()
 
-    response = None
-    while response is None:
-        status, response = request.next_chunk()
-        if status:
-            pct = int(status.progress() * 100)
-            print(f"   ⬆️  Upload {pct}%")
-
-    print(f"✅ Upload concluído: {response.get('webViewLink')}")
     return {
-        "id": response.get("id"),
-        "name": response.get("name"),
-        "link": response.get("webViewLink"),
+        "id": created["id"],
+        "link": created.get("webViewLink"),
     }
 
 def ajustar_duracao(input_video, output_video, fator):
