@@ -968,12 +968,12 @@ D) VINHETAS (CAMINHO DEPENDE DO PROGRAMA)
 O campo "arquivo" deve incluir o caminho correto conforme o programa:
 
 Se programa = "GP":
-  abertura → "GP/Vinheta_Abertura_h264.mp4"
+  abertura → "GP/vinheta_abertura_h264.mp4"
   encerramento → "GP/vinheta_encerramento.mp4"
 
 Se programa = "RTB":
-  abertura → "RTB/RaisethebarVinheta_abertura.mp4"
-  encerramento → "RTB/RaisetheBarVinheta_Encerramento.mp4"
+  abertura → "RTB/raisethebarvinheta_abertura.mp4"
+  encerramento → "RTB/raisethebarvinheta_encerramento.mp4"
 
 Regras:
 - Abertura:
