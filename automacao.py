@@ -20,10 +20,12 @@ from video_editor import (
 )
 from database import atualizar_status
 from logger import get_logger
+from notifier import notificar_erro_clickup
 
 log = get_logger(__name__)
 
 CREDS_PATH = None
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # ══════════════════════════════════════════════════════════════════
 #  Ponto de entrada público
@@ -57,6 +59,13 @@ def disparar_automacao(
         tb = traceback.format_exc()
         log.error(f"[job={job_id}] ✗ Falha no pipeline: {exc}\n{tb}")
         atualizar_status(job_id, "erro", erro=f"{type(exc).__name__}: {exc}\n\n{tb}")
+        notificar_erro_clickup(
+            job_id=job_id,
+            titulo=titulo,
+            etapa="pipeline",
+            erro=f"{type(exc).__name__}: {exc}",
+            link_video=link,
+        )
 
     finally:
         os.chdir(original_dir)
@@ -156,10 +165,11 @@ def _executar_pipeline(
     log.info(f"[job={job_id}] {len(cortados)}/{len(config['trechos'])} trechos cortados.")
 
     # ── PASSO 7: Juntar trechos + vinhetas ───────────────────────
-    log.info(f"[job={job_id}] [7/11] Juntando {len(config['lista_arquivos'])} arquivos...")
+    lista_arquivos_juncao = [_resolver_arquivo_juncao(c) for c in config["lista_arquivos"]]
+    log.info(f"[job={job_id}] [7/11] Juntando {len(lista_arquivos_juncao)} arquivos...")
     file_junto = "video_junto.mp4"
     ok = juntar_videos(
-        lista_arquivos=config["lista_arquivos"],
+        lista_arquivos=lista_arquivos_juncao,
         arquivo_saida=file_junto,
         reencoder=True,
     )
@@ -169,7 +179,7 @@ def _executar_pipeline(
     # ── PASSO 8: Aplicar QR Code ──────────────────────────────────
     log.info(f"[job={job_id}] [8/11] Aplicando QR Code...")
     file_qr = "video_com_qr.mp4"
-    qr_path = os.path.join(pasta, "QR CODE.png")
+    qr_path = _asset_path(pasta, "QR CODE.png")
     if not os.path.isfile(qr_path):
         raise FileNotFoundError(f"QR Code não encontrado: {qr_path}")
 
@@ -198,9 +208,9 @@ def _executar_pipeline(
     # ── PASSO 10: Inserções finais ────────────────────────────────
     log.info(f"[job={job_id}] [10/11] Aplicando inserções finais...")
     insercoes_candidatas = [
-        {"path": os.path.join(pasta, "inserção.mov"),    "start": tempo_para_segundos("00:10:00"), "end": tempo_para_segundos("00:10:12")},
-        {"path": os.path.join(pasta, "inscreva-se.mov"), "start": tempo_para_segundos("00:15:00"), "end": tempo_para_segundos("00:15:07")},
-        {"path": os.path.join(pasta, "instagram.mov"),   "start": tempo_para_segundos("00:20:00"), "end": tempo_para_segundos("00:20:10")},
+        {"path": _asset_path(pasta, "inserção.mov"),    "start": tempo_para_segundos("00:10:00"), "end": tempo_para_segundos("00:10:12")},
+        {"path": _asset_path(pasta, "inscreva-se.mov"), "start": tempo_para_segundos("00:15:00"), "end": tempo_para_segundos("00:15:07")},
+        {"path": _asset_path(pasta, "instagram.mov"),   "start": tempo_para_segundos("00:20:00"), "end": tempo_para_segundos("00:20:10")},
     ]
 
     for ins in insercoes_candidatas:
@@ -261,6 +271,26 @@ def _sanitizar_nome(texto: str) -> str:
     texto = re.sub(r'[\\/*?:"<>|]', "", texto)   # chars proibidos no Drive/Windows
     texto = re.sub(r"\s+", " ", texto)             # espaços duplos
     return texto[:200]                             # Drive aceita até 255 chars
+
+
+def _asset_path(*parts: str) -> str:
+    return os.path.join(BASE_DIR, *parts)
+
+
+def _resolver_arquivo_juncao(caminho: str) -> str:
+    """
+    Resolve caminhos da junção no ambiente do Railway:
+    - trechos/* ficam relativos ao job_dir (cwd atual)
+    - assets estÃ¡ticos (GP/*, RTB/*) viram caminho absoluto em BASE_DIR
+    """
+    if os.path.isabs(caminho):
+        return caminho
+
+    normalizado = caminho.replace("\\", "/").lstrip("./")
+    if normalizado.startswith("trechos/"):
+        return caminho
+
+    return _asset_path(*normalizado.split("/"))
 
 
 def _limpar_job_dir(job_dir: str, job_id) -> None:
