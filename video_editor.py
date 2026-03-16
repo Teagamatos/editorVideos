@@ -1150,7 +1150,7 @@ Retorne SOMENTE JSON válido.
 
 ROTEIRO:
 ---
-{roteiro}
+{ROTEIRO}
 ---"""
 
 
@@ -1670,7 +1670,7 @@ def separar_tarja(item):
 #  EXECUÇÃO PRINCIPAL
 # ══════════════════════════════════════════════════════════════
 
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
 #     cortar_multiplos_trechos(
 #          arquivo_entrada=r'RTB\\Video\\Cópia de EPS4 - 18 novembro 2025 .mp4',
@@ -1683,104 +1683,104 @@ if __name__ == "__main__":
 #          reencoder=True,
 #          pos_tarja=True,
 #      )
-    file =  r"C:\Users\thiag\Downloads\EPS4.mp4"
-    roteiro = r"C:\Users\thiag\Downloads\155. Roteiro de edição RTB -  Leandro Herculano Cargo _ Elementar Comunicação.docx.pdf"
-    roteiro_json = interpretar_roteiro_com_openai_texto(roteiro)
-    print(json.dumps(roteiro_json, ensure_ascii=False, indent=2))
-    config =gerar_variaveis_pipeline(roteiro_json)
-    print(config["trechos"])
-    print(config["lista_tarjas"])
-    print(config["lista_arquivos"])
-    print(config["lista_nome_tarja"])
-    programa = config["programa"].lower()
-    if programa == "rtb":
-        pasta = r'RTB\\'
-    elif programa == "gp":
-        pasta = r'GP\\'
-    else:
-        print('Erro, não foi dectado nenhum programa no Roteiro')
-    for item in config["lista_nome_tarja"]:
-        nome, cargo, arquivo = (
-            separar_tarja(item)["nome"],
-            separar_tarja(item)["cargo"],
-            separar_tarja(item)["arquivo"]
-        )
-        criar_tarja = video_tarja.main(pasta, nome, cargo, arquivo, 'openai')
-
-    arquivo = baixar_arquivo_drive_por_link(
-        link_drive="https://drive.google.com/drive/u/0/folders/1GwZQG1h2yVcYw7Wctv6DQYNXxq04pOlw",
-        pasta_saida=f"{pasta}Video",
-        extensoes=[".mp4", ".mov"]  # recomendo filtrar
-    )
-
-    # ── PASSO 1: Aplicar tarjas no vídeo original ─────────────
-    file_com_tarja = "video_com_tarja.mp4"
-    aplicar_tarjas(
-        arquivo_entrada=arquivo,
-        arquivo_saida=file_com_tarja,
-        lista_tarjas=config["lista_tarjas"],)
-
-    # # # # ── PASSO 2: Cortar os trechos (pos_tarja=True preserva as tarjas) ──
-    cortar_multiplos_trechos(
-        arquivo_entrada=file_com_tarja,
-        pasta_saida="trechos",
-        trechos=config["trechos"],
-        reencoder=True,
-        pos_tarja=True,
-    )
-    #
-    # # # ── PASSO 3: Juntar trechos + vinhetas ───────────────────
-    file_junto = "video_junto.mp4"
-    juntar_videos(
-        lista_arquivos=config["lista_arquivos"],
-        arquivo_saida=file_junto,
-        reencoder=True,
-    )
-    file = 'video_com_qr.mp4'
-
-    aplicar_tarjas(arquivo_entrada=file_junto, arquivo_saida=file, lista_tarjas=[(F"{pasta}QR CODE.png", "00:03:00", "00:43:00"),])
-
-    # ── PASSO 4 (opcional): Zoom lento em momentos específicos ──
-    # file_zoom = "video_com_zoom.mp4"
-    # aplicar_zoom_lento(
-    #     arquivo_entrada=file_junto,
-    #     arquivo_saida=file_zoom,
-    #     lista_zooms=[
-    #         ("00:00:00", "00:00:31", 1.0,  1.43),  # zoom-in na entrada
-    #         # ("00:05:00", "00:05:08", 1.12, 1.0),   # zoom-out
-    #     ],
-    # )
-
-   #  # # ── PASSO 5: Adicionar música com ducking ─────────────────
-    file_final = "video_com_musica.mp4"
-    adicionar_bgm_com_ducking(
-        arquivo_entrada=file,   # ou file_zoom se usar o zoom
-        arquivo_saida=file_final,
-        inicio="00:00:00",
-        fim="00:00:20",
-        volume_bgm=0.18,
-        duck_db=12,
-    )
-
-    inserir_video_em_baixo(video_principal=file_final,
-                           saida='video_finalizado.mp4',
-                           insercoes=[{
-        "path": rf"{pasta}inserção.mov",
-        "start": tempo_para_segundos("00:10:00"),
-        "end": tempo_para_segundos("00:10:12"),
-    },
-   {
-       "path": rf"{pasta}inscreva-se.mov",
-       "start": tempo_para_segundos("00:15:00"),
-       "end": tempo_para_segundos("00:015:07"),
-   },
-    {
-        "path": rf"{pasta}instagram.mov",
-        "start": tempo_para_segundos("00:20:00"),
-        "end": tempo_para_segundos("00:20:10"),
-    }])
-
-
-    print("\n✅ Pipeline completo finalizado!")
-    print(f"   Arquivo final: video_finalizado.mp4")
-
+#     file =  r"C:\Users\thiag\Downloads\EPS4.mp4"
+#     roteiro = r"C:\Users\thiag\Downloads\155. Roteiro de edição RTB -  Leandro Herculano Cargo _ Elementar Comunicação.docx.pdf"
+#     roteiro_json = interpretar_roteiro_com_openai_texto(roteiro)
+#     print(json.dumps(roteiro_json, ensure_ascii=False, indent=2))
+#     config =gerar_variaveis_pipeline(roteiro_json)
+#     print(config["trechos"])
+#     print(config["lista_tarjas"])
+#     print(config["lista_arquivos"])
+#     print(config["lista_nome_tarja"])
+#     programa = config["programa"].lower()
+#     if programa == "rtb":
+#         pasta = r'RTB\\'
+#     elif programa == "gp":
+#         pasta = r'GP\\'
+#     else:
+#         print('Erro, não foi dectado nenhum programa no Roteiro')
+#     for item in config["lista_nome_tarja"]:
+#         nome, cargo, arquivo = (
+#             separar_tarja(item)["nome"],
+#             separar_tarja(item)["cargo"],
+#             separar_tarja(item)["arquivo"]
+#         )
+#         criar_tarja = video_tarja.main(pasta, nome, cargo, arquivo, 'openai')
+#
+#     arquivo = baixar_arquivo_drive_por_link(
+#         link_drive="https://drive.google.com/drive/u/0/folders/1GwZQG1h2yVcYw7Wctv6DQYNXxq04pOlw",
+#         pasta_saida=f"{pasta}Video",
+#         extensoes=[".mp4", ".mov"]  # recomendo filtrar
+#     )
+#
+#     # ── PASSO 1: Aplicar tarjas no vídeo original ─────────────
+#     file_com_tarja = "video_com_tarja.mp4"
+#     aplicar_tarjas(
+#         arquivo_entrada=arquivo,
+#         arquivo_saida=file_com_tarja,
+#         lista_tarjas=config["lista_tarjas"],)
+#
+#     # # # # ── PASSO 2: Cortar os trechos (pos_tarja=True preserva as tarjas) ──
+#     cortar_multiplos_trechos(
+#         arquivo_entrada=file_com_tarja,
+#         pasta_saida="trechos",
+#         trechos=config["trechos"],
+#         reencoder=True,
+#         pos_tarja=True,
+#     )
+#     #
+#     # # # ── PASSO 3: Juntar trechos + vinhetas ───────────────────
+#     file_junto = "video_junto.mp4"
+#     juntar_videos(
+#         lista_arquivos=config["lista_arquivos"],
+#         arquivo_saida=file_junto,
+#         reencoder=True,
+#     )
+#     file = 'video_com_qr.mp4'
+#
+#     aplicar_tarjas(arquivo_entrada=file_junto, arquivo_saida=file, lista_tarjas=[(F"{pasta}QR CODE.png", "00:03:00", "00:43:00"),])
+#
+#     # ── PASSO 4 (opcional): Zoom lento em momentos específicos ──
+#     # file_zoom = "video_com_zoom.mp4"
+#     # aplicar_zoom_lento(
+#     #     arquivo_entrada=file_junto,
+#     #     arquivo_saida=file_zoom,
+#     #     lista_zooms=[
+#     #         ("00:00:00", "00:00:31", 1.0,  1.43),  # zoom-in na entrada
+#     #         # ("00:05:00", "00:05:08", 1.12, 1.0),   # zoom-out
+#     #     ],
+#     # )
+#
+#    #  # # ── PASSO 5: Adicionar música com ducking ─────────────────
+#     file_final = "video_com_musica.mp4"
+#     adicionar_bgm_com_ducking(
+#         arquivo_entrada=file,   # ou file_zoom se usar o zoom
+#         arquivo_saida=file_final,
+#         inicio="00:00:00",
+#         fim="00:00:20",
+#         volume_bgm=0.18,
+#         duck_db=12,
+#     )
+#
+#     inserir_video_em_baixo(video_principal=file_final,
+#                            saida='video_finalizado.mp4',
+#                            insercoes=[{
+#         "path": rf"{pasta}inserção.mov",
+#         "start": tempo_para_segundos("00:10:00"),
+#         "end": tempo_para_segundos("00:10:12"),
+#     },
+#    {
+#        "path": rf"{pasta}inscreva-se.mov",
+#        "start": tempo_para_segundos("00:15:00"),
+#        "end": tempo_para_segundos("00:015:07"),
+#    },
+#     {
+#         "path": rf"{pasta}instagram.mov",
+#         "start": tempo_para_segundos("00:20:00"),
+#         "end": tempo_para_segundos("00:20:10"),
+#     }])
+#
+#
+#     print("\n✅ Pipeline completo finalizado!")
+#     print(f"   Arquivo final: video_finalizado.mp4")
+#
