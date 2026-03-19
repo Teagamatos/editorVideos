@@ -11,6 +11,7 @@ from video_editor import (
     gerar_variaveis_pipeline,
     baixar_arquivo_drive_por_link,
     aplicar_tarjas,
+    cortar_video,
     cortar_multiplos_trechos,
     juntar_videos,
     adicionar_bgm_com_ducking,
@@ -391,12 +392,13 @@ def _executar_pipeline_cortes(
         raise RuntimeError(f"Falha ao baixar video do Drive (link='{link}'): {exc}") from exc
 
     log.info(f"[job={job_id}] [3/5] Cortando {len(trechos)} trechos...")
-    cortados = cortar_multiplos_trechos(
+    cortados = _cortar_trechos_com_log(
         arquivo_entrada=arquivo_video,
-        pasta_saida="trechos",
         trechos=trechos,
+        pasta_saida="trechos",
         reencoder=True,
         pos_tarja=False,
+        job_id=job_id,
     )
     if not cortados:
         raise RuntimeError("Nenhum trecho cortado. Verifique os timestamps do roteiro.")
@@ -463,6 +465,45 @@ def _executar_pipeline_cortes(
         f"file_id={resultado_upload['id']} | "
         f"link={resultado_upload['link']}"
     )
+
+
+def _cortar_trechos_com_log(
+    *,
+    arquivo_entrada: str,
+    trechos: list[tuple[str, str]],
+    pasta_saida: str,
+    reencoder: bool,
+    pos_tarja: bool,
+    job_id,
+) -> list[str]:
+    os.makedirs(pasta_saida, exist_ok=True)
+    ext = os.path.splitext(arquivo_entrada)[1] or ".mp4"
+    gerados: list[str] = []
+
+    for i, (inicio, fim) in enumerate(trechos, start=1):
+        saida = os.path.join(pasta_saida, f"trecho_{i:02d}{ext}")
+        log.info(f"[job={job_id}] Cortando trecho {i}/{len(trechos)}: {inicio} -> {fim}")
+        try:
+            ok = cortar_video(
+                arquivo_entrada=arquivo_entrada,
+                arquivo_saida=saida,
+                inicio=inicio,
+                fim=fim,
+                reencoder=reencoder,
+                pos_tarja=pos_tarja,
+            )
+        except Exception as exc:
+            log.warning(f"[job={job_id}] Falha no trecho {i}: {exc}")
+            ok = False
+
+        if ok:
+            gerados.append(saida)
+            log.info(f"[job={job_id}] Trecho {i}/{len(trechos)} concluido.")
+        else:
+            log.warning(f"[job={job_id}] Trecho {i}/{len(trechos)} ignorado por falha.")
+
+    log.info(f"[job={job_id}] Cortes finalizados: {len(gerados)}/{len(trechos)}")
+    return gerados
 
 
 def _sanitizar_nome(texto: str) -> str:
@@ -627,7 +668,11 @@ def _converter_para_9x16_com_tracking(
         raise RuntimeError("Falha ao carregar classificador de rosto para tracking.")
 
     center_x = src_w / 2.0
-    alpha = 0.20  # suavização
+    target_center_x = center_x
+    alpha = float(os.getenv("TRACKING_ALPHA", "0.05"))
+    detect_every = int(os.getenv("TRACKING_DETECT_EVERY", "6"))
+    deadzone_px = float(os.getenv("TRACKING_DEADZONE_PX", "80"))
+    max_move_px = float(os.getenv("TRACKING_MAX_MOVE_PX", "12"))
     frame_idx = 0
 
     while True:
@@ -635,13 +680,22 @@ def _converter_para_9x16_com_tracking(
         if not ok:
             break
 
-        if frame_idx % 2 == 0:
+        if frame_idx % max(1, detect_every) == 0:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             faces = face_detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
             if len(faces) > 0:
                 x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
                 face_center = x + (w / 2.0)
-                center_x = (1 - alpha) * center_x + alpha * face_center
+                target_center_x = face_center
+
+        delta = target_center_x - center_x
+        if abs(delta) <= deadzone_px:
+            delta = 0.0
+        if delta > max_move_px:
+            delta = max_move_px
+        elif delta < -max_move_px:
+            delta = -max_move_px
+        center_x = center_x + (alpha * delta if delta != 0.0 else 0.0)
 
         x1 = int(round(center_x - crop_w / 2))
         x1 = max(0, min(x1, src_w - crop_w))
