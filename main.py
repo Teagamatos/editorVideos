@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from logger import get_logger
 from database import salvar_solicitacao, atualizar_status
-from automacao import disparar_automacao
+from automacao import disparar_automacao, disparar_automacao_cortes
 from fastapi.middleware.cors import CORSMiddleware
 log = get_logger(__name__)
 
@@ -130,6 +130,62 @@ async def receber_formulario(payload: VideoRequest, background_tasks: Background
     return {
         "success": True,
         "message": "Solicitação recebida. Processamento iniciado em background.",
+        "job_id": job_id,
+        "data": registro,
+    }
+
+
+@app.post("/video-request-cortes")
+async def receber_formulario_cortes(payload: VideoRequest, background_tasks: BackgroundTasks):
+    titulo = payload.tituloVideo.strip()
+    link = payload.linkVideo.strip()
+    roteiro = payload.roteiroTexto.strip()
+
+    pasta_destino_id = os.getenv("GOOGLE_DRIVE_DEST_FOLDER_ID", "").strip()
+    if not pasta_destino_id:
+        log.error("GOOGLE_DRIVE_DEST_FOLDER_ID não configurada.")
+        raise HTTPException(
+            status_code=503,
+            detail="Configuração do servidor incompleta: GOOGLE_DRIVE_DEST_FOLDER_ID não definida.",
+        )
+
+    log.info(
+        f"Nova solicitação de cortes | titulo='{titulo}' | "
+        f"pasta_destino='{pasta_destino_id}' | link='{link[:60]}...'"
+    )
+
+    created_at = payload.timestamp.isoformat() if payload.timestamp else datetime.utcnow().isoformat()
+
+    try:
+        registro = salvar_solicitacao(
+            titulo=titulo,
+            link=link,
+            roteiro=roteiro,
+            enviado=False,
+            created_at=created_at,
+        )
+    except Exception as exc:
+        log.error(f"Falha ao salvar solicitação de cortes no Supabase: {exc}", exc_info=True)
+        raise HTTPException(
+            status_code=503,
+            detail="Não foi possível registrar a solicitação de cortes. Tente novamente.",
+        )
+
+    job_id = registro.get("id", "?")
+    log.info(f"Solicitação de cortes salva | job_id={job_id}")
+
+    background_tasks.add_task(
+        disparar_automacao_cortes,
+        titulo=titulo,
+        link=link,
+        roteiro=roteiro,
+        registro=registro,
+        pasta_destino_id=pasta_destino_id,
+    )
+
+    return {
+        "success": True,
+        "message": "Solicitação de cortes recebida. Processamento iniciado em background.",
         "job_id": job_id,
         "data": registro,
     }

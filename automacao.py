@@ -1,6 +1,7 @@
 import json
 import os
 import shutil
+import subprocess
 import tempfile
 import traceback
 
@@ -75,6 +76,46 @@ def disparar_automacao(
 # ══════════════════════════════════════════════════════════════════
 #  Pipeline interno
 # ══════════════════════════════════════════════════════════════════
+
+def disparar_automacao_cortes(
+    titulo: str,
+    link: str,
+    roteiro: str,
+    registro: dict,
+    pasta_destino_id: str,
+) -> None:
+    job_id = registro.get("id", "?")
+    log.info(f"[job={job_id}] === AUTOMACAO CORTES DISPARADA === titulo='{titulo}'")
+    log.info(f"[job={job_id}] Pasta de destino Drive (cortes): {pasta_destino_id}")
+
+    job_dir = tempfile.mkdtemp(prefix=f"job_cortes_{job_id}_")
+    original_dir = os.getcwd()
+    log.info(f"[job={job_id}] Diretorio de trabalho (cortes): {job_dir}")
+
+    atualizar_status(job_id, "processando")
+
+    try:
+        os.chdir(job_dir)
+        _executar_pipeline_cortes(titulo, link, roteiro, job_id, pasta_destino_id)
+        atualizar_status(job_id, "concluido")
+        log.info(f"[job={job_id}] Pipeline de cortes concluido com sucesso.")
+
+    except Exception as exc:
+        tb = traceback.format_exc()
+        log.error(f"[job={job_id}] Falha no pipeline de cortes: {exc}\n{tb}")
+        atualizar_status(job_id, "erro", erro=f"{type(exc).__name__}: {exc}\n\n{tb}")
+        notificar_erro_clickup(
+            job_id=job_id,
+            titulo=titulo,
+            etapa="pipeline_cortes",
+            erro=f"{type(exc).__name__}: {exc}",
+            link_video=link,
+        )
+
+    finally:
+        os.chdir(original_dir)
+        _limpar_job_dir(job_dir, job_id)
+
 
 def _executar_pipeline(
     titulo: str,
@@ -264,6 +305,97 @@ def _executar_pipeline(
 #  Helpers
 # ══════════════════════════════════════════════════════════════════
 
+def _executar_pipeline_cortes(
+    titulo: str,
+    link: str,
+    roteiro: str,
+    job_id,
+    pasta_destino_id: str,
+) -> None:
+    log.info(f"[job={job_id}] [1/5] Interpretando roteiro de cortes com OpenAI...")
+    texto_para_ia = f"TITULO DO EPISODIO:\n{titulo}\n\nROTEIRO:\n{roteiro}".strip()
+
+    try:
+        roteiro_json = interpretar_roteiro_com_openai_texto(texto_para_ia)
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao interpretar roteiro com OpenAI: {exc}") from exc
+
+    trechos = _extrair_trechos(roteiro_json)
+    if not trechos:
+        raise RuntimeError("Nenhum trecho valido retornado pela IA para corte.")
+    log.info(f"[job={job_id}] Trechos identificados para corte: {len(trechos)}")
+
+    log.info(f"[job={job_id}] [2/5] Baixando video do Google Drive...")
+    try:
+        arquivo_video = baixar_arquivo_drive_por_link(
+            link_drive=link,
+            pasta_saida="entrada",
+            extensoes=[".mp4", ".mov"],
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao baixar video do Drive (link='{link}'): {exc}") from exc
+
+    log.info(f"[job={job_id}] [3/5] Cortando {len(trechos)} trechos...")
+    cortados = cortar_multiplos_trechos(
+        arquivo_entrada=arquivo_video,
+        pasta_saida="trechos",
+        trechos=trechos,
+        reencoder=True,
+        pos_tarja=False,
+    )
+    if not cortados:
+        raise RuntimeError("Nenhum trecho cortado. Verifique os timestamps do roteiro.")
+
+    log.info(f"[job={job_id}] [4/5] Juntando trechos cortados...")
+    arquivo_final = "video_cortado_final.mp4"
+    if len(cortados) == 1:
+        shutil.copy2(cortados[0], arquivo_final)
+    else:
+        ok = juntar_videos(
+            lista_arquivos=cortados,
+            arquivo_saida=arquivo_final,
+            reencoder=True,
+        )
+        if not ok:
+            raise RuntimeError("FFmpeg falhou ao juntar os trechos cortados.")
+
+    nome_drive = _sanitizar_nome(f"{titulo} - cortes") + ".mp4"
+    target_seconds = int(os.getenv("CORTES_TARGET_SECONDS", "180"))
+    if target_seconds > 0:
+        duracao_final = _obter_duracao_segundos(arquivo_final)
+        if duracao_final and duracao_final > target_seconds:
+            log.info(
+                f"[job={job_id}] Ajustando duração dos cortes de {duracao_final:.2f}s para {target_seconds}s sem perder conteúdo..."
+            )
+            arquivo_ajustado = "video_cortado_final_3min.mp4"
+            _acelerar_para_duracao(
+                arquivo_entrada=arquivo_final,
+                arquivo_saida=arquivo_ajustado,
+                duracao_atual=duracao_final,
+                duracao_alvo=target_seconds,
+            )
+            arquivo_final = arquivo_ajustado
+
+    log.info(f"[job={job_id}] [5/5] Enviando video de cortes para o Drive...")
+    try:
+        resultado_upload = fazer_upload_drive(
+            arquivo_local=arquivo_final,
+            folder_id=pasta_destino_id,
+            credenciais_json_path=None,
+            nome_no_drive=nome_drive,
+            mime_type="video/mp4",
+        )
+    except Exception as exc:
+        raise RuntimeError(f"Falha ao fazer upload dos cortes para o Drive: {exc}") from exc
+
+    atualizar_status(job_id, "concluido", link_video_final=resultado_upload["link"])
+    log.info(
+        f"[job={job_id}] Upload de cortes concluido | "
+        f"file_id={resultado_upload['id']} | "
+        f"link={resultado_upload['link']}"
+    )
+
+
 def _sanitizar_nome(texto: str) -> str:
     """Remove caracteres inválidos para nome de arquivo no Drive."""
     import re
@@ -271,6 +403,79 @@ def _sanitizar_nome(texto: str) -> str:
     texto = re.sub(r'[\\/*?:"<>|]', "", texto)   # chars proibidos no Drive/Windows
     texto = re.sub(r"\s+", " ", texto)             # espaços duplos
     return texto[:200]                             # Drive aceita até 255 chars
+
+
+def _extrair_trechos(roteiro_json: dict) -> list[tuple[str, str]]:
+    bruto = roteiro_json.get("trechos", [])
+    trechos: list[tuple[str, str]] = []
+    for item in bruto:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            continue
+        inicio = str(item[0]).strip()
+        fim = str(item[1]).strip()
+        if inicio and fim:
+            trechos.append((inicio, fim))
+    return trechos
+
+
+def _obter_duracao_segundos(arquivo_video: str) -> float:
+    comando = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        arquivo_video,
+    ]
+    resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if resultado.returncode != 0:
+        raise RuntimeError(f"Falha ao obter duração do vídeo: {resultado.stderr.strip()}")
+    try:
+        return float((resultado.stdout or "").strip())
+    except ValueError as exc:
+        raise RuntimeError("Não foi possível interpretar a duração do vídeo.") from exc
+
+
+def _atempo_chain(fator: float) -> str:
+    partes: list[str] = []
+    restante = fator
+    while restante > 2.0:
+        partes.append("atempo=2.0")
+        restante /= 2.0
+    while restante < 0.5:
+        partes.append("atempo=0.5")
+        restante /= 0.5
+    partes.append(f"atempo={restante:.6f}")
+    return ",".join(partes)
+
+
+def _acelerar_para_duracao(
+    arquivo_entrada: str,
+    arquivo_saida: str,
+    duracao_atual: float,
+    duracao_alvo: int,
+) -> None:
+    if duracao_atual <= 0 or duracao_alvo <= 0:
+        raise ValueError("Duração inválida para ajuste.")
+
+    fator = duracao_atual / duracao_alvo
+    if fator <= 1.0:
+        shutil.copy2(arquivo_entrada, arquivo_saida)
+        return
+
+    filtro = f"[0:v]setpts=PTS/{fator:.6f}[v];[0:a]{_atempo_chain(fator)}[a]"
+    comando = [
+        "ffmpeg", "-y",
+        "-i", arquivo_entrada,
+        "-filter_complex", filtro,
+        "-map", "[v]",
+        "-map", "[a]",
+        "-c:v", "libx264",
+        "-c:a", "aac",
+        arquivo_saida,
+    ]
+    resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if resultado.returncode != 0:
+        raise RuntimeError(f"Falha ao ajustar duração para {duracao_alvo}s: {resultado.stderr}")
 
 
 def _asset_path(*parts: str) -> str:
