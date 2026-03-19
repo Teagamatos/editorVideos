@@ -83,8 +83,14 @@ def cortar_video(
     fim_fmt    = formatar_tempo(fim)
     codec_flags = ["-c", "copy"] if not reencoder else ["-c:v", "libx264", "-c:a", "aac"]
 
+    inicio_seg = tempo_para_segundos(inicio_fmt)
+    fim_seg = tempo_para_segundos(fim_fmt)
+    if fim_seg <= inicio_seg:
+        print(f"[ERRO] Trecho invalido (fim <= inicio): {inicio_fmt} -> {fim_fmt}")
+        return False
+
     comando = [
-        "ffmpeg", "-y",
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
         "-i", arquivo_entrada,
         "-ss", inicio_fmt,
         "-to", fim_fmt,
@@ -101,7 +107,17 @@ def cortar_video(
     print(f"   Saída   : {arquivo_saida}")
     print(f"   Modo    : {modo}\n")
 
-    resultado = subprocess.run(comando, stderr=subprocess.PIPE, text=True)
+    try:
+        resultado = subprocess.run(
+            comando,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=900,
+        )
+    except subprocess.TimeoutExpired:
+        print("[ERRO] FFmpeg excedeu o tempo limite no corte (900s).")
+        return False
     if resultado.returncode == 0:
         print(f"[OK] Vídeo salvo em: '{arquivo_saida}'")
         return True

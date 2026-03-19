@@ -416,13 +416,24 @@ def _sanitizar_nome(texto: str) -> str:
 def _extrair_trechos(roteiro_json: dict) -> list[tuple[str, str]]:
     bruto = roteiro_json.get("trechos", [])
     trechos: list[tuple[str, str]] = []
+    ignorados = 0
     for item in bruto:
         if not isinstance(item, (list, tuple)) or len(item) != 2:
             continue
         inicio = str(item[0]).strip()
         fim = str(item[1]).strip()
-        if inicio and fim:
-            trechos.append((inicio, fim))
+        if not inicio or not fim:
+            continue
+        try:
+            if tempo_para_segundos(fim) <= tempo_para_segundos(inicio):
+                ignorados += 1
+                continue
+        except Exception:
+            ignorados += 1
+            continue
+        trechos.append((inicio, fim))
+    if ignorados:
+        log.warning("Trechos ignorados por duração inválida (fim <= início): %s", ignorados)
     return trechos
 
 
