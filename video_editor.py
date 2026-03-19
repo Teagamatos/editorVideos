@@ -120,6 +120,7 @@ def cortar_multiplos_trechos(
     pos_tarja: bool = False,
 ) -> List[str]:
     """Corta múltiplos trechos de um mesmo vídeo."""
+    pasta_saida = os.path.abspath(pasta_saida)
     os.makedirs(pasta_saida, exist_ok=True)
     ext = extensao or os.path.splitext(arquivo_entrada)[1]
 
@@ -1488,8 +1489,8 @@ def baixar_drive_file_id(
 
     os.makedirs(pasta_saida, exist_ok=True)
 
-    nome_final = nome_saida if nome_saida else nome_original
-    caminho_final = os.path.join(pasta_saida, nome_final)
+    nome_final = _sanitizar_nome_local(nome_saida if nome_saida else nome_original, file_id)
+    caminho_final = os.path.abspath(os.path.join(pasta_saida, nome_final))
 
     request = service.files().get_media(fileId=file_id)
 
@@ -1503,6 +1504,8 @@ def baixar_drive_file_id(
                 print(f"⬇️ Download {int(status.progress() * 100)}%")
 
     # ✅ valida tamanho
+    if not os.path.isfile(caminho_final):
+        raise FileNotFoundError(f"Arquivo baixado não encontrado no caminho final: {caminho_final}")
     size_disk = os.path.getsize(caminho_final)
     print(f"📦 Size: drive={size_drive} bytes | disk={size_disk} bytes")
 
@@ -1516,6 +1519,16 @@ def baixar_drive_file_id(
 
     print(f"✅ Baixado: {caminho_final}")
     return caminho_final
+
+def _sanitizar_nome_local(nome: str, file_id: str) -> str:
+    nome = (nome or "").strip()
+    nome = os.path.basename(nome)
+    nome = nome.replace("\\", "_").replace("/", "_")
+    nome = re.sub(r"[\x00-\x1f]", "", nome).strip()
+    if not nome:
+        nome = f"{file_id}.bin"
+    return nome
+
 
 def baixar_arquivo_drive_por_link(
     link_drive: str,
