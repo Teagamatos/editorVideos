@@ -96,7 +96,14 @@ def disparar_automacao_cortes(
 
     try:
         os.chdir(job_dir)
-        _executar_pipeline_cortes(titulo, link, roteiro, job_id, pasta_destino_id)
+        _executar_pipeline_cortes(
+            titulo=titulo,
+            link=link,
+            roteiro=roteiro,
+            job_id=job_id,
+            pasta_destino_id=pasta_destino_id,
+            centralizar_falante=False,
+        )
         atualizar_status(job_id, "concluido")
         log.info(f"[job={job_id}] Pipeline de cortes concluido com sucesso.")
 
@@ -108,6 +115,53 @@ def disparar_automacao_cortes(
             job_id=job_id,
             titulo=titulo,
             etapa="pipeline_cortes",
+            erro=f"{type(exc).__name__}: {exc}",
+            link_video=link,
+        )
+
+    finally:
+        os.chdir(original_dir)
+        _limpar_job_dir(job_dir, job_id)
+
+
+def disparar_automacao_cortes_teste_centralizado(
+    titulo: str,
+    link: str,
+    roteiro: str,
+    registro: dict,
+    pasta_destino_id: str,
+) -> None:
+    job_id = registro.get("id", "?")
+    log.info(f"[job={job_id}] === AUTOMACAO CORTES TESTE CENTRALIZADO === titulo='{titulo}'")
+    log.info(f"[job={job_id}] Pasta de destino Drive (cortes): {pasta_destino_id}")
+
+    job_dir = tempfile.mkdtemp(prefix=f"job_cortes_track_{job_id}_")
+    original_dir = os.getcwd()
+    log.info(f"[job={job_id}] Diretorio de trabalho (cortes tracking): {job_dir}")
+
+    atualizar_status(job_id, "processando")
+
+    try:
+        os.chdir(job_dir)
+        _executar_pipeline_cortes(
+            titulo=titulo,
+            link=link,
+            roteiro=roteiro,
+            job_id=job_id,
+            pasta_destino_id=pasta_destino_id,
+            centralizar_falante=True,
+        )
+        atualizar_status(job_id, "concluido")
+        log.info(f"[job={job_id}] Pipeline de cortes tracking concluido com sucesso.")
+
+    except Exception as exc:
+        tb = traceback.format_exc()
+        log.error(f"[job={job_id}] Falha no pipeline de cortes tracking: {exc}\n{tb}")
+        atualizar_status(job_id, "erro", erro=f"{type(exc).__name__}: {exc}\n\n{tb}")
+        notificar_erro_clickup(
+            job_id=job_id,
+            titulo=titulo,
+            etapa="pipeline_cortes_tracking",
             erro=f"{type(exc).__name__}: {exc}",
             link_video=link,
         )
@@ -311,6 +365,7 @@ def _executar_pipeline_cortes(
     roteiro: str,
     job_id,
     pasta_destino_id: str,
+    centralizar_falante: bool = False,
 ) -> None:
     log.info(f"[job={job_id}] [1/5] Interpretando roteiro de cortes com OpenAI...")
     texto_para_ia = f"TITULO DO EPISODIO:\n{titulo}\n\nROTEIRO:\n{roteiro}".strip()
@@ -361,10 +416,16 @@ def _executar_pipeline_cortes(
 
     log.info(f"[job={job_id}] Convertendo cortes para formato vertical 9:16...")
     arquivo_vertical = "video_cortado_final_9x16.mp4"
-    _converter_para_9x16(
-        arquivo_entrada=arquivo_final,
-        arquivo_saida=arquivo_vertical,
-    )
+    if centralizar_falante:
+        _converter_para_9x16_com_tracking(
+            arquivo_entrada=arquivo_final,
+            arquivo_saida=arquivo_vertical,
+        )
+    else:
+        _converter_para_9x16(
+            arquivo_entrada=arquivo_final,
+            arquivo_saida=arquivo_vertical,
+        )
     arquivo_final = arquivo_vertical
 
     nome_drive = _sanitizar_nome(f"{titulo} - cortes") + ".mp4"
@@ -521,6 +582,94 @@ def _converter_para_9x16(
     resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if resultado.returncode != 0:
         raise RuntimeError(f"Falha ao converter vídeo para 9:16: {resultado.stderr}")
+
+
+def _converter_para_9x16_com_tracking(
+    arquivo_entrada: str,
+    arquivo_saida: str,
+    largura: int = 1080,
+    altura: int = 1920,
+) -> None:
+    try:
+        import cv2
+    except Exception as exc:
+        raise RuntimeError(
+            "OpenCV não disponível para tracking. Instale opencv-python-headless e use endpoint de teste novamente."
+        ) from exc
+
+    cap = cv2.VideoCapture(arquivo_entrada)
+    if not cap.isOpened():
+        raise RuntimeError("Falha ao abrir vídeo para tracking 9:16.")
+
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    src_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    if src_w <= 0 or src_h <= 0:
+        cap.release()
+        raise RuntimeError("Dimensões inválidas do vídeo para tracking 9:16.")
+
+    crop_w = max(1, int(src_h * 9 / 16))
+    if crop_w > src_w:
+        crop_w = src_w
+    crop_h = src_h
+
+    tmp_sem_audio = "video_cortes_tracking_sem_audio.mp4"
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
+    out = cv2.VideoWriter(tmp_sem_audio, fourcc, fps, (largura, altura))
+    if not out.isOpened():
+        cap.release()
+        raise RuntimeError("Falha ao iniciar escrita do vídeo tracking.")
+
+    face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    if face_detector.empty():
+        out.release()
+        cap.release()
+        raise RuntimeError("Falha ao carregar classificador de rosto para tracking.")
+
+    center_x = src_w / 2.0
+    alpha = 0.20  # suavização
+    frame_idx = 0
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+
+        if frame_idx % 2 == 0:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = face_detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(60, 60))
+            if len(faces) > 0:
+                x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+                face_center = x + (w / 2.0)
+                center_x = (1 - alpha) * center_x + alpha * face_center
+
+        x1 = int(round(center_x - crop_w / 2))
+        x1 = max(0, min(x1, src_w - crop_w))
+        cropped = frame[0:crop_h, x1:x1 + crop_w]
+        resized = cv2.resize(cropped, (largura, altura), interpolation=cv2.INTER_LINEAR)
+        out.write(resized)
+        frame_idx += 1
+
+    out.release()
+    cap.release()
+
+    comando_audio = [
+        "ffmpeg", "-y",
+        "-i", tmp_sem_audio,
+        "-i", arquivo_entrada,
+        "-map", "0:v:0",
+        "-map", "1:a?",
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-shortest",
+        arquivo_saida,
+    ]
+    resultado = subprocess.run(comando_audio, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if resultado.returncode != 0:
+        raise RuntimeError(f"Falha ao mesclar áudio no tracking 9:16: {resultado.stderr}")
 
 
 def _asset_path(*parts: str) -> str:
