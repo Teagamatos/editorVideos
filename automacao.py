@@ -359,6 +359,14 @@ def _executar_pipeline_cortes(
         if not ok:
             raise RuntimeError("FFmpeg falhou ao juntar os trechos cortados.")
 
+    log.info(f"[job={job_id}] Convertendo cortes para formato vertical 9:16...")
+    arquivo_vertical = "video_cortado_final_9x16.mp4"
+    _converter_para_9x16(
+        arquivo_entrada=arquivo_final,
+        arquivo_saida=arquivo_vertical,
+    )
+    arquivo_final = arquivo_vertical
+
     nome_drive = _sanitizar_nome(f"{titulo} - cortes") + ".mp4"
     target_seconds = int(os.getenv("CORTES_TARGET_SECONDS", "180"))
     if target_seconds > 0:
@@ -476,6 +484,32 @@ def _acelerar_para_duracao(
     resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if resultado.returncode != 0:
         raise RuntimeError(f"Falha ao ajustar duração para {duracao_alvo}s: {resultado.stderr}")
+
+
+def _converter_para_9x16(
+    arquivo_entrada: str,
+    arquivo_saida: str,
+    largura: int = 1080,
+    altura: int = 1920,
+) -> None:
+    filtro = (
+        f"scale={largura}:{altura}:force_original_aspect_ratio=increase,"
+        f"crop={largura}:{altura}"
+    )
+    comando = [
+        "ffmpeg", "-y",
+        "-i", arquivo_entrada,
+        "-vf", filtro,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-crf", "20",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        arquivo_saida,
+    ]
+    resultado = subprocess.run(comando, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    if resultado.returncode != 0:
+        raise RuntimeError(f"Falha ao converter vídeo para 9:16: {resultado.stderr}")
 
 
 def _asset_path(*parts: str) -> str:
