@@ -762,12 +762,14 @@ def inserir_video_em_baixo(
     margem_inferior: int = 40,
     crf: int = 18,
     preset: str = "medium",
+    fade_padrao: float = 0.5,   # NOVO: duração padrão do fade in/out (segundos)
 ) -> bool:
     """
-    Sobrepõe 1+ vídeos menores na parte inferior do vídeo principal em intervalos.
+    Sobrepõe 1+ vídeos menores na parte inferior do vídeo principal em intervalos,
+    com fade in/out suave.
 
     insercoes = [
-      {"path": "...mp4", "start": 60, "end": 75},
+      {"path": "...mp4", "start": 60, "end": 75, "fade": 0.5},  # "fade" é opcional
       ...
     ]
     Mantém áudio do principal.
@@ -799,13 +801,22 @@ def inserir_video_em_baixo(
     for idx, ins in enumerate(insercoes, start=1):
         start = float(ins["start"])
         end = float(ins["end"])
+        dur = end - start
+        fade = float(ins.get("fade", fade_padrao))
+        # não deixa o fade ultrapassar metade da duração do clipe
+        fade = max(0.0, min(fade, dur / 2))
 
-        # prepara inserção e desloca no tempo
-        fc.append(f"[{idx}:v]setpts=PTS-STARTPTS+{start}/TB[ins{idx}]")
+        # prepara inserção, desloca no tempo e converte pra yuva420p (canal alfa)
+        chain = f"[{idx}:v]setpts=PTS-STARTPTS+{start}/TB,format=yuva420p"
+
+        if fade > 0:
+            chain += f",fade=t=in:st={start}:d={fade}:alpha=1"
+            chain += f",fade=t=out:st={end - fade}:d={fade}:alpha=1"
+
+        chain += f"[ins{idx}]"
+        fc.append(chain)
 
         # scale2ref: escala a inserção baseado no tamanho do vídeo base do momento
-        # iw/ih = dimensões do overlay (inserção)
-        # main_w/main_h = dimensões do vídeo principal (ref)
         fc.append(
             f"[ins{idx}][{current}]scale2ref="
             f"w=main_w*{largura_relativa}:h=-1[insS{idx}][ref{idx}]"
@@ -818,7 +829,8 @@ def inserir_video_em_baixo(
             f"[ref{idx}][insS{idx}]overlay="
             f"x={x_expr}:y={y_expr}:"
             f"enable='between(t,{start},{end})':"
-            f"eof_action=pass"
+            f"eof_action=pass:"
+            f"format=yuv420"
             f"[v{idx}]"
         )
 
@@ -833,7 +845,7 @@ def inserir_video_em_baixo(
         saida
     ]
 
-    print("🎬 Inserindo vídeo na parte inferior...")
+    print("🎬 Inserindo vídeo na parte inferior (com fade)...")
     r = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     if r.returncode == 0:
@@ -1733,117 +1745,119 @@ def separar_tarja(item):
 #  EXECUÇÃO PRINCIPAL
 # ══════════════════════════════════════════════════════════════
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 
-#     cortar_multiplos_trechos(
-#          arquivo_entrada=r'RTB\\Video\\Cópia de EPS4 - 18 novembro 2025 .mp4',
-#          pasta_saida="trechos",
-#          trechos=[('00:24:12', '00:24:21'), ('00:00:27', '00:00:50'), ('00:03:41', '00:03:50'), ('00:05:04', '00:05:09'), ('00:06:33', '00:06:53'),
-#                   ('00:07:20', '00:07:26'), ('00:07:43', '00:07:52'), ('00:08:12', '00:08:14'), ('00:08:20', '00:08:22'), ('00:08:32', '00:08:38'),
-#                   ('00:08:44', '00:08:45'), ('00:08:50', '00:08:55'), ('00:09:01', '00:09:08'), ('00:09:17', '00:09:18'), ('00:09:45', '00:09:51'),
-#                   ('00:10:10', '00:10:12'), ('00:10:17', '00:10:21'), ('00:31:35', '00:31:45'), ('00:32:17', '00:32:36'), ('00:32:47', '00:33:00'),
-#                   ('00:33:22', '00:33:24'), ('00:33:40', '00:34:05'), ('00:34:08', '00:34:16'), ('00:34:20', '00:34:26'), ('00:42:28', '00:42:45')],
-#          reencoder=True,
-#          pos_tarja=True,
-#      )
-#     file =  r"C:\Users\thiag\Downloads\EPS4.mp4"
-#     roteiro = r"C:\Users\thiag\Downloads\155. Roteiro de edição RTB -  Leandro Herculano Cargo _ Elementar Comunicação.docx.pdf"
-#     roteiro_json = interpretar_roteiro_com_openai_texto(roteiro)
-#     print(json.dumps(roteiro_json, ensure_ascii=False, indent=2))
-#     config =gerar_variaveis_pipeline(roteiro_json)
-#     print(config["trechos"])
-#     print(config["lista_tarjas"])
-#     print(config["lista_arquivos"])
-#     print(config["lista_nome_tarja"])
-#     programa = config["programa"].lower()
-#     if programa == "rtb":
-#         pasta = r'RTB\\'
-#     elif programa == "gp":
-#         pasta = r'GP\\'
-#     else:
-#         print('Erro, não foi dectado nenhum programa no Roteiro')
-#     for item in config["lista_nome_tarja"]:
-#         nome, cargo, arquivo = (
-#             separar_tarja(item)["nome"],
-#             separar_tarja(item)["cargo"],
-#             separar_tarja(item)["arquivo"]
-#         )
-#         criar_tarja = video_tarja.main(pasta, nome, cargo, arquivo, 'openai')
-#
-#     arquivo = baixar_arquivo_drive_por_link(
-#         link_drive="https://drive.google.com/drive/u/0/folders/1GwZQG1h2yVcYw7Wctv6DQYNXxq04pOlw",
-#         pasta_saida=f"{pasta}Video",
-#         extensoes=[".mp4", ".mov"]  # recomendo filtrar
-#     )
-#
-#     # ── PASSO 1: Aplicar tarjas no vídeo original ─────────────
-#     file_com_tarja = "video_com_tarja.mp4"
-#     aplicar_tarjas(
-#         arquivo_entrada=arquivo,
-#         arquivo_saida=file_com_tarja,
-#         lista_tarjas=config["lista_tarjas"],)
-#
-#     # # # # ── PASSO 2: Cortar os trechos (pos_tarja=True preserva as tarjas) ──
-#     cortar_multiplos_trechos(
-#         arquivo_entrada=file_com_tarja,
-#         pasta_saida="trechos",
-#         trechos=config["trechos"],
-#         reencoder=True,
-#         pos_tarja=True,
-#     )
-#     #
-#     # # # ── PASSO 3: Juntar trechos + vinhetas ───────────────────
-#     file_junto = "video_junto.mp4"
-#     juntar_videos(
-#         lista_arquivos=config["lista_arquivos"],
-#         arquivo_saida=file_junto,
-#         reencoder=True,
-#     )
-#     file = 'video_com_qr.mp4'
-#
-#     aplicar_tarjas(arquivo_entrada=file_junto, arquivo_saida=file, lista_tarjas=[(F"{pasta}QR CODE.png", "00:03:00", "00:43:00"),])
-#
-#     # ── PASSO 4 (opcional): Zoom lento em momentos específicos ──
-#     # file_zoom = "video_com_zoom.mp4"
-#     # aplicar_zoom_lento(
-#     #     arquivo_entrada=file_junto,
-#     #     arquivo_saida=file_zoom,
-#     #     lista_zooms=[
-#     #         ("00:00:00", "00:00:31", 1.0,  1.43),  # zoom-in na entrada
-#     #         # ("00:05:00", "00:05:08", 1.12, 1.0),   # zoom-out
-#     #     ],
-#     # )
-#
-#    #  # # ── PASSO 5: Adicionar música com ducking ─────────────────
-#     file_final = "video_com_musica.mp4"
-#     adicionar_bgm_com_ducking(
-#         arquivo_entrada=file,   # ou file_zoom se usar o zoom
-#         arquivo_saida=file_final,
-#         inicio="00:00:00",
-#         fim="00:00:20",
-#         volume_bgm=0.18,
-#         duck_db=12,
-#     )
-#
-#     inserir_video_em_baixo(video_principal=file_final,
-#                            saida='video_finalizado.mp4',
-#                            insercoes=[{
-#         "path": rf"{pasta}inserção.mov",
-#         "start": tempo_para_segundos("00:10:00"),
-#         "end": tempo_para_segundos("00:10:12"),
-#     },
-#    {
-#        "path": rf"{pasta}inscreva-se.mov",
-#        "start": tempo_para_segundos("00:15:00"),
-#        "end": tempo_para_segundos("00:015:07"),
-#    },
-#     {
-#         "path": rf"{pasta}instagram.mov",
-#         "start": tempo_para_segundos("00:20:00"),
-#         "end": tempo_para_segundos("00:20:10"),
-#     }])
-#
-#
-#     print("\n✅ Pipeline completo finalizado!")
-#     print(f"   Arquivo final: video_finalizado.mp4")
+    # cortar_multiplos_trechos(
+    #      # arquivo_entrada=r'RTB\\Video\\Cópia de EPS4 - 18 novembro 2025 .mp4',
+    #      arquivo_entrada=r"C:\Users\thiag\Downloads\Cópia de EPS4 - 18 novembro 2025 .mp4",
+    #      pasta_saida="trechos",
+    #      trechos=[('00:24:12', '00:24:21'), ('00:00:27', '00:00:50'), ('00:03:41', '00:03:50'), ('00:05:04', '00:05:09'), ('00:06:33', '00:06:53'),
+    #               ('00:07:20', '00:07:26'), ('00:07:43', '00:07:52'), ('00:08:12', '00:08:14'), ('00:08:20', '00:08:22'), ('00:08:32', '00:08:38'),
+    #               ('00:08:44', '00:08:45'), ('00:08:50', '00:08:55'), ('00:09:01', '00:09:08'), ('00:09:17', '00:09:18'), ('00:09:45', '00:09:51'),
+    #               ('00:10:10', '00:10:12'), ('00:10:17', '00:10:21'), ('00:31:35', '00:31:45'), ('00:32:17', '00:32:36'), ('00:32:47', '00:33:00'),
+    #               ('00:33:22', '00:33:24'), ('00:33:40', '00:34:05'), ('00:34:08', '00:34:16'), ('00:34:20', '00:34:26'), ('00:42:28', '00:42:45')],
+    #      reencoder=True,
+    #      pos_tarja=True,
+    #  )
+    arquivo =  r"RTB\\Video\\Cópia de EPS4 - 18 novembro 2025 .mp4"
+    roteiro = r"C:\Users\thiag\Downloads\155. Roteiro de edição RTB -  Leandro Herculano Cargo _ Elementar Comunicação.docx.pdf"
+    roteiro_json = interpretar_roteiro_com_openai_texto(roteiro)
+    print(json.dumps(roteiro_json, ensure_ascii=False, indent=2))
+    config =gerar_variaveis_pipeline(roteiro_json)
+    print(config["trechos"])
+    print(config["lista_tarjas"])
+    print(config["lista_arquivos"])
+    print(config["lista_nome_tarja"])
+    programa = config["programa"].lower()
+    if programa == "rtb":
+        pasta = r'RTB\\'
+    elif programa == "gp":
+        pasta = r'GP\\'
+    else:
+        print('Erro, não foi dectado nenhum programa no Roteiro')
+    for item in config["lista_nome_tarja"]:
+        nome, cargo, arquivo = (
+            separar_tarja(item)["nome"],
+            separar_tarja(item)["cargo"],
+            separar_tarja(item)["arquivo"]
+        )
+        criar_tarja = video_tarja.main(pasta, nome, cargo, arquivo, 'openai')
+
+    # arquivo = baixar_arquivo_drive_por_link(
+    #     link_drive="https://drive.google.com/drive/u/0/folders/1GwZQG1h2yVcYw7Wctv6DQYNXxq04pOlw",
+    #     pasta_saida=f"{pasta}Video",
+    #     extensoes=[".mp4", ".mov"]  # recomendo filtrar
+    # )
+
+
+    # ── PASSO 1: Aplicar tarjas no vídeo original ─────────────
+    file_com_tarja = "video_com_tarja.mp4"
+    aplicar_tarjas(
+        arquivo_entrada=arquivo,
+        arquivo_saida=file_com_tarja,
+        lista_tarjas=config["lista_tarjas"],)
+
+    # # # # ── PASSO 2: Cortar os trechos (pos_tarja=True preserva as tarjas) ──
+    cortar_multiplos_trechos(
+        arquivo_entrada=file_com_tarja,
+        pasta_saida="trechos",
+        trechos=config["trechos"],
+        reencoder=True,
+        pos_tarja=True,
+    )
+    #
+    # # # ── PASSO 3: Juntar trechos + vinhetas ───────────────────
+    file_junto = "video_junto.mp4"
+    juntar_videos(
+        lista_arquivos=config["lista_arquivos"],
+        arquivo_saida=file_junto,
+        reencoder=True,
+    )
+    file = 'video_com_qr.mp4'
+
+    aplicar_tarjas(arquivo_entrada=file_junto, arquivo_saida=file, lista_tarjas=[(F"{pasta}QR CODE.png", "00:03:00", "00:43:00"),])
+
+    # ── PASSO 4 (opcional): Zoom lento em momentos específicos ──
+    # file_zoom = "video_com_zoom.mp4"
+    # aplicar_zoom_lento(
+    #     arquivo_entrada=file_junto,
+    #     arquivo_saida=file_zoom,
+    #     lista_zooms=[
+    #         ("00:00:00", "00:00:31", 1.0,  1.43),  # zoom-in na entrada
+    #         # ("00:05:00", "00:05:08", 1.12, 1.0),   # zoom-out
+    #     ],
+    # )
+
+   #  # # ── PASSO 5: Adicionar música com ducking ─────────────────
+    file_final = "video_com_musica.mp4"
+    adicionar_bgm_com_ducking(
+        arquivo_entrada=file,   # ou file_zoom se usar o zoom
+        arquivo_saida=file_final,
+        inicio="00:00:00",
+        fim="00:00:20",
+        volume_bgm=0.18,
+        duck_db=12,
+    )
+
+    inserir_video_em_baixo(video_principal=file_final,
+                           saida='video_finalizado.mp4',
+                           insercoes=[{
+        "path": rf"{pasta}inserção.mov",
+        "start": tempo_para_segundos("00:10:00"),
+        "end": tempo_para_segundos("00:10:12"),
+    },
+   {
+       "path": rf"{pasta}inscreva-se.mov",
+       "start": tempo_para_segundos("00:15:00"),
+       "end": tempo_para_segundos("00:015:07"),
+   },
+    {
+        "path": rf"{pasta}instagram.mov",
+        "start": tempo_para_segundos("00:20:00"),
+        "end": tempo_para_segundos("00:20:10"),
+    }])
+
+
+    print("\n✅ Pipeline completo finalizado!")
+    print(f"   Arquivo final: video_finalizado.mp4")
 #
